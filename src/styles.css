@@ -619,6 +619,10 @@ h2 {
   gap: 10px;
 }
 
+.copy-actions .primary-action {
+  border-radius: 999px;
+}
+
 .primary-action {
   display: inline-flex;
   min-height: 44px;
