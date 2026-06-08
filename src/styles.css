@@ -65,11 +65,15 @@ button:disabled {
   padding: 18px 0 24px;
 }
 
+.header-copy {
+  flex: 1 1 auto;
+  text-align: center;
+}
+
 .github-link {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
   min-height: 42px;
   padding: 0 16px;
   border: 1px solid #2ea44f;
@@ -843,6 +847,11 @@ h2 {
   .app-header {
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+
+  .header-copy {
+    flex: 1 1 calc(100% - 64px);
+    text-align: left;
   }
 
   .github-link {
