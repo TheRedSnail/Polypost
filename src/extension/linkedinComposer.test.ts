@@ -4,6 +4,7 @@ import {
   closeNativeLinkedInComposer,
   dismissNativeComposerDiscardConfirmation,
   findLinkedInComposer,
+  findLinkedInPostButton,
   findNativeComposerDialog,
   getLinkedInComposerAnchor,
   setLinkedInComposerText,
@@ -117,6 +118,52 @@ describe('linkedinComposer helpers', () => {
     expect(dismissNativeComposerDiscardConfirmation()).toBe(true);
 
     expect(discardHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('finds the composer inside a shadow root', () => {
+    document.body.innerHTML = '<div id="interop-outlet"></div>';
+    const host = document.querySelector<HTMLElement>('#interop-outlet');
+    const shadow = host!.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+      <div role="dialog" class="share-box-v2__modal">
+        <div class="ql-container">
+          <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+        </div>
+        <button type="button" class="share-actions__primary-action">Post</button>
+      </div>
+    `;
+    const editor = shadow.querySelector<HTMLElement>('.ql-editor');
+    expect(editor).not.toBeNull();
+    mockVisible(editor!);
+
+    expect(findLinkedInComposer()).toBe(editor);
+    expect(findNativeComposerDialog()).toBe(shadow.querySelector('[role="dialog"]'));
+  });
+
+  it('finds the enabled native Post button inside a shadow root and skips the extension button', () => {
+    document.body.innerHTML = `
+      <div id="linkedin-post-formatter-extension-root">
+        <button type="button">Post</button>
+      </div>
+      <div id="interop-outlet"></div>
+    `;
+    const host = document.querySelector<HTMLElement>('#interop-outlet');
+    const shadow = host!.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+      <div role="dialog">
+        <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+        <button type="button" class="share-actions__primary-action" disabled>Post</button>
+      </div>
+    `;
+    const editor = shadow.querySelector<HTMLElement>('.ql-editor');
+    mockVisible(editor!);
+    const nativePost = shadow.querySelector<HTMLButtonElement>('.share-actions__primary-action');
+
+    expect(findLinkedInPostButton()).toBeNull();
+
+    nativePost!.disabled = false;
+
+    expect(findLinkedInPostButton()).toBe(nativePost);
   });
 
   it('writes text and dispatches input and change events', () => {

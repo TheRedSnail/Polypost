@@ -23,7 +23,7 @@
   inset: 0;
   z-index: 2147483647;
   display: grid;
-  align-items: stretch;
+  align-items: center;
   justify-items: center;
   padding: 8px;
   background: rgba(0, 0, 0, 0.48);
@@ -32,8 +32,8 @@
 .lipf-panel {
   display: flex;
   width: min(760px, calc(100% - 16px));
-  height: 100%;
-  max-height: calc(100vh - 16px);
+  height: auto;
+  max-height: min(720px, calc(100vh - 32px));
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
@@ -1088,10 +1088,13 @@
   margin-top: 6px;
 }
 
+/* visibility:hidden (not opacity) so the hidden composer is removed from the
+   focus order — otherwise LinkedIn's modal focus trap steals focus back from
+   the formatter editor and the user cannot type. The post bridge temporarily
+   switches the composer to a focusable state when it needs to insert text. */
 .lipf-native-composer-hidden {
-  opacity: 0 !important;
-  pointer-events: none !important;
   visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .lipf-subtitle {

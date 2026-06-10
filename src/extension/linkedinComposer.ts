@@ -8,13 +8,38 @@ const COMPOSER_SELECTORS = [
 ];
 const EXTENSION_ROOT_SELECTOR = '#linkedin-post-formatter-extension-root';
 
-export function findLinkedInComposer(root: ParentNode = document): HTMLElement | null {
-  for (const selector of COMPOSER_SELECTORS) {
-    const candidates = Array.from(root.querySelectorAll<HTMLElement>(selector));
-    const composer = candidates.find(isUsableComposer);
+export const NATIVE_HIDDEN_CLASS_NAME = 'lipf-native-composer-hidden';
 
-    if (composer) {
-      return composer;
+// LinkedIn renders the share composer inside a shadow root (for example the
+// div#interop-outlet host), so every lookup has to pierce shadow boundaries.
+function getSearchRoots(root: ParentNode): ParentNode[] {
+  const roots: ParentNode[] = [root];
+
+  for (let index = 0; index < roots.length; index += 1) {
+    for (const host of Array.from(roots[index].querySelectorAll<HTMLElement>('*'))) {
+      if (host.shadowRoot) {
+        roots.push(host.shadowRoot);
+      }
+    }
+  }
+
+  return roots;
+}
+
+export function queryAllDeep<T extends HTMLElement>(selector: string, root: ParentNode = document): T[] {
+  return getSearchRoots(root).flatMap((searchRoot) => Array.from(searchRoot.querySelectorAll<T>(selector)));
+}
+
+export function findLinkedInComposer(root: ParentNode = document): HTMLElement | null {
+  const searchRoots = getSearchRoots(root);
+
+  for (const selector of COMPOSER_SELECTORS) {
+    for (const searchRoot of searchRoots) {
+      const composer = Array.from(searchRoot.querySelectorAll<HTMLElement>(selector)).find(isUsableComposer);
+
+      if (composer) {
+        return composer;
+      }
     }
   }
 
@@ -39,14 +64,29 @@ export function findNativeComposerDialogs(root: ParentNode = document): HTMLElem
   });
 }
 
-export function findLinkedInPostButton(root: ParentNode = document): HTMLButtonElement | null {
-  const dialog = findNativeComposerDialog(root) ?? root;
-  const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('button'));
+export function findLinkedInPostButton(root: ParentNode = document): HTMLElement | null {
+  const dialog = findNativeComposerDialog(root);
+  const controls = dialog ? getButtonLikeControls(dialog) : getButtonLikeControls(root);
 
-  return buttons.find((button) => {
-    const label = `${button.textContent ?? ''} ${button.getAttribute('aria-label') ?? ''}`.trim().toLowerCase();
-    return !button.disabled && /^post$/.test(label);
+  return controls.find((control) => {
+    return !control.closest(EXTENSION_ROOT_SELECTOR) && !isControlDisabled(control) && isPostActionControl(control);
   }) ?? null;
+}
+
+function isPostActionControl(control: HTMLElement): boolean {
+  if (control.classList.contains('share-actions__primary-action')) {
+    return true;
+  }
+
+  return [control.getAttribute('aria-label'), control.textContent].some((label) => (label ?? '').trim().toLowerCase() === 'post');
+}
+
+function isControlDisabled(control: HTMLElement): boolean {
+  if (control instanceof HTMLButtonElement && control.disabled) {
+    return true;
+  }
+
+  return control.getAttribute('aria-disabled') === 'true' || control.classList.contains('artdeco-button--disabled');
 }
 
 export function isStartPostControl(element: HTMLElement): boolean {
@@ -55,9 +95,13 @@ export function isStartPostControl(element: HTMLElement): boolean {
 }
 
 export function openNativeLinkedInComposer(): boolean {
-  const control = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"]')).find(isStartPostControl);
+  const control = getButtonLikeControls(document).find(isStartPostControl);
   control?.click();
   return Boolean(control);
+}
+
+export function clickLinkedInControl(control: HTMLElement) {
+  clickControl(control);
 }
 
 export function closeNativeLinkedInComposer(root: ParentNode = document): boolean {
@@ -86,8 +130,24 @@ export function dismissNativeComposerDiscardConfirmation(root: ParentNode = docu
     return false;
   }
 
+  hideDialogSurface(discardControl.closest<HTMLElement>('[role="dialog"]'));
   clickControl(discardControl);
   return true;
+}
+
+// Hides a dialog plus its overlay/backdrop parent so the user never sees a
+// flash of LinkedIn chrome while the extension drives it.
+export function hideDialogSurface(dialog: HTMLElement | null) {
+  if (!dialog) {
+    return;
+  }
+
+  dialog.classList.add(NATIVE_HIDDEN_CLASS_NAME);
+  const parent = dialog.parentElement;
+
+  if (parent && /overlay|backdrop/i.test(parent.className)) {
+    parent.classList.add(NATIVE_HIDDEN_CLASS_NAME);
+  }
 }
 
 export function setLinkedInComposerText(composer: HTMLElement, text: string): boolean {
@@ -104,8 +164,8 @@ export function setLinkedInComposerText(composer: HTMLElement, text: string): bo
   }
 
   composer.dispatchEvent(createInputEvent(text, 'input'));
-  composer.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
-  composer.dispatchEvent(new Event('change', { bubbles: true }));
+  composer.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true }));
+  composer.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
   return true;
 }
 
@@ -137,7 +197,7 @@ function isUsableComposer(composer: HTMLElement): boolean {
 }
 
 function getDialogs(root: ParentNode): HTMLElement[] {
-  const dialogs = Array.from(root.querySelectorAll<HTMLElement>('[role="dialog"]'));
+  const dialogs = queryAllDeep<HTMLElement>('[role="dialog"]', root);
 
   if (root instanceof HTMLElement && root.matches('[role="dialog"]')) {
     dialogs.unshift(root);
@@ -161,7 +221,7 @@ function hasNativeComposerCue(text: string): boolean {
 }
 
 function hasNativeComposerCandidate(dialog: HTMLElement): boolean {
-  const composerCandidate = Array.from(dialog.querySelectorAll<HTMLElement>('[contenteditable="true"]')).find((element) => {
+  const composerCandidate = queryAllDeep<HTMLElement>('[contenteditable="true"]', dialog).find((element) => {
     const label = [element.getAttribute('aria-label'), element.getAttribute('data-placeholder'), element.textContent]
       .filter(Boolean)
       .join(' ')
@@ -249,7 +309,7 @@ function isControlNearDialog(control: HTMLElement, dialog: HTMLElement): boolean
 }
 
 function getButtonLikeControls(root: ParentNode): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>('button, [role="button"]'));
+  return queryAllDeep<HTMLElement>('button, [role="button"]', root);
 }
 
 function getControlLabel(control: HTMLElement): string {
@@ -273,19 +333,19 @@ function dispatchPointerEvent(control: HTMLElement, type: string) {
     return;
   }
 
-  control.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'mouse' }));
+  control.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerType: 'mouse' }));
 }
 
 function dispatchMouseEvent(control: HTMLElement, type: string) {
-  control.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+  control.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, composed: true }));
 }
 
 function createInputEvent(text: string, type: 'beforeinput' | 'input'): Event {
   if (typeof InputEvent === 'function') {
-    return new InputEvent(type, { bubbles: true, cancelable: type === 'beforeinput', data: text, inputType: 'insertText' });
+    return new InputEvent(type, { bubbles: true, cancelable: type === 'beforeinput', composed: true, data: text, inputType: 'insertText' });
   }
 
-  return new Event(type, { bubbles: true, cancelable: type === 'beforeinput' });
+  return new Event(type, { bubbles: true, cancelable: type === 'beforeinput', composed: true });
 }
 
 function selectComposerContents(composer: HTMLElement) {
