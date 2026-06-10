@@ -150,6 +150,172 @@ export function hideDialogSurface(dialog: HTMLElement | null) {
   }
 }
 
+// LinkedIn keeps a hidden file input for the composer's media button. Prefer
+// one inside the composer dialog, then any media-typed input on the page.
+export function findLinkedInMediaFileInput(root: ParentNode = document): HTMLInputElement | null {
+  const inputs = queryAllDeep<HTMLInputElement>('input[type="file"]', root).filter((input) => {
+    return !input.closest(EXTENSION_ROOT_SELECTOR) && acceptsMediaFiles(input);
+  });
+
+  if (inputs.length === 0) {
+    return null;
+  }
+
+  const dialog = findNativeComposerDialog(root);
+
+  if (dialog) {
+    const dialogInputs = queryAllDeep<HTMLInputElement>('input[type="file"]', dialog);
+    const inDialog = inputs.find((input) => dialogInputs.includes(input));
+
+    if (inDialog) {
+      return inDialog;
+    }
+  }
+
+  return inputs.find((input) => Boolean(input.getAttribute('accept'))) ?? inputs[0];
+}
+
+function acceptsMediaFiles(input: HTMLInputElement): boolean {
+  const accept = (input.getAttribute('accept') ?? '').toLowerCase();
+  return !accept || accept.includes('image') || accept.includes('video');
+}
+
+// Hands the user's files to LinkedIn's composer: first by setting the hidden
+// media file input (what the Add-media button uses), falling back to a
+// simulated drag-and-drop onto the composer surface.
+export function attachFilesToLinkedInComposer(files: File[], root: ParentNode = document): boolean {
+  if (files.length === 0) {
+    return false;
+  }
+
+  const input = findLinkedInMediaFileInput(root);
+
+  if (input && setFileInputFiles(input, files)) {
+    return true;
+  }
+
+  return dropFilesOnLinkedInComposer(files, root);
+}
+
+export function dropFilesOnLinkedInComposer(files: File[], root: ParentNode = document): boolean {
+  const transfer = createFileTransfer(files);
+  const target = findLinkedInComposer(root) ?? findNativeComposerDialog(root);
+
+  if (!transfer || !target) {
+    return false;
+  }
+
+  for (const type of ['dragenter', 'dragover', 'drop']) {
+    target.dispatchEvent(createDragEvent(type, transfer));
+  }
+
+  return true;
+}
+
+// Some composer variants open a media editor dialog after an upload, which
+// must be confirmed (Next/Done) before the share composer returns with the
+// attachment. Hidden dialogs (e.g. video.js caption settings, which also has a
+// "Done" button) must be skipped.
+export function findLinkedInMediaNextButton(root: ParentNode = document): HTMLElement | null {
+  const dialogs = queryAllDeep<HTMLElement>('[role="dialog"]', root).filter((dialog) => {
+    if (dialog.closest(EXTENSION_ROOT_SELECTOR) || dialog.className.includes('vjs-')) {
+      return false;
+    }
+
+    const rect = dialog.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+
+  for (const dialog of dialogs) {
+    const control = getButtonLikeControls(dialog).find((candidate) => {
+      if (candidate.closest(EXTENSION_ROOT_SELECTOR) || isControlDisabled(candidate)) {
+        return false;
+      }
+
+      return [candidate.getAttribute('aria-label'), candidate.textContent].some((label) => {
+        const normalized = (label ?? '').trim().toLowerCase();
+        return normalized === 'next' || normalized === 'done';
+      });
+    });
+
+    if (control) {
+      return control;
+    }
+  }
+
+  return null;
+}
+
+// The redesigned (phoenix) composer attaches dropped files inline: a "Remove
+// media" / "Edit media preview" control appears in the share dialog once the
+// upload has registered. Its presence confirms the attachment took.
+export function findLinkedInMediaAttachedIndicator(root: ParentNode = document): HTMLElement | null {
+  const dialog = findNativeComposerDialog(root);
+
+  if (!dialog) {
+    return null;
+  }
+
+  return getButtonLikeControls(dialog).find((control) => {
+    if (control.closest(EXTENSION_ROOT_SELECTOR)) {
+      return false;
+    }
+
+    const label = getControlLabel(control);
+    return label.includes('remove media') || label.includes('edit media preview');
+  }) ?? null;
+}
+
+function setFileInputFiles(input: HTMLInputElement, files: File[]): boolean {
+  const transfer = createFileTransfer(files);
+
+  if (!transfer) {
+    return false;
+  }
+
+  try {
+    input.files = transfer.files;
+  } catch {
+    try {
+      Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
+    } catch {
+      return false;
+    }
+  }
+
+  input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+  return true;
+}
+
+function createFileTransfer(files: File[]): DataTransfer | null {
+  if (typeof DataTransfer !== 'function') {
+    return null;
+  }
+
+  try {
+    const transfer = new DataTransfer();
+    files.forEach((file) => transfer.items.add(file));
+    return transfer;
+  } catch {
+    return null;
+  }
+}
+
+function createDragEvent(type: string, transfer: DataTransfer): Event {
+  if (typeof DragEvent === 'function') {
+    try {
+      return new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer });
+    } catch {
+      // Fall through to the generic event below.
+    }
+  }
+
+  const event = new Event(type, { bubbles: true, cancelable: true, composed: true });
+  Object.defineProperty(event, 'dataTransfer', { value: transfer });
+  return event;
+}
+
 export function setLinkedInComposerText(composer: HTMLElement, text: string): boolean {
   if (!composer.isConnected || composer.getAttribute('contenteditable') !== 'true') {
     return false;

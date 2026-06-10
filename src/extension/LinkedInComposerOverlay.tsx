@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Send, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Film, ImagePlus, Send, X } from 'lucide-react';
 
 import type { CopyStatus } from '../components/CopyPanel';
 import { DraftHistoryPanel } from '../components/DraftHistoryPanel';
@@ -22,7 +22,7 @@ import {
 interface LinkedInComposerOverlayProps {
   open: boolean;
   onClose: () => void;
-  onPost: (text: string) => Promise<boolean>;
+  onPost: (text: string, files: File[]) => Promise<boolean>;
 }
 
 type Status = 'idle' | 'copied' | 'posting' | 'posted' | 'error';
@@ -31,6 +31,17 @@ const EMPTY_DOCUMENT: EditorNode = {
   type: 'doc',
   content: [{ type: 'paragraph' }],
 };
+
+// LinkedIn allows up to 20 images per post, or a single video with no other media.
+const MAX_IMAGES = 20;
+
+function isImageFile(file: File): boolean {
+  return file.type.startsWith('image/');
+}
+
+function isVideoFile(file: File): boolean {
+  return file.type.startsWith('video/');
+}
 
 export function LinkedInComposerOverlay({ open, onClose, onPost }: LinkedInComposerOverlayProps) {
   const [initialLoad] = useState(loadDraft);
@@ -43,8 +54,24 @@ export function LinkedInComposerOverlay({ open, onClose, onPost }: LinkedInCompo
   const [storageNotice, setStorageNotice] = useState<string | null>(() => initialLoad.error);
   const [status, setStatus] = useState<Status>('idle');
   const [statusMessage, setStatusMessage] = useState('');
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
   const exportedText = exportLinkedInText(editorDocument);
   const summary = getLinkedInCharacterSummary(exportedText);
+
+  const attachmentPreviews = useMemo(() => {
+    return attachments.map((file) => (isImageFile(file) ? URL.createObjectURL(file) : null));
+  }, [attachments]);
+
+  useEffect(() => {
+    return () => {
+      attachmentPreviews.forEach((url) => {
+        if (url) {
+          URL.revokeObjectURL(url);
+        }
+      });
+    };
+  }, [attachmentPreviews]);
 
   useEffect(() => {
     if (!open) {
@@ -136,15 +163,59 @@ export function LinkedInComposerOverlay({ open, onClose, onPost }: LinkedInCompo
     }
   }
 
+  function handleAddMediaFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+
+    const next = [...attachments];
+    let notice = '';
+
+    for (const file of Array.from(fileList)) {
+      if (!isImageFile(file) && !isVideoFile(file)) {
+        notice = `${file.name} is not an image or video.`;
+        continue;
+      }
+
+      if (isVideoFile(file) && next.length > 0) {
+        notice = 'LinkedIn allows one video per post, with no other media.';
+        continue;
+      }
+
+      if (isImageFile(file) && next.some(isVideoFile)) {
+        notice = 'LinkedIn posts cannot mix images with a video.';
+        continue;
+      }
+
+      if (isImageFile(file) && next.filter(isImageFile).length >= MAX_IMAGES) {
+        notice = `LinkedIn allows up to ${MAX_IMAGES} images per post.`;
+        continue;
+      }
+
+      next.push(file);
+    }
+
+    setAttachments(next);
+    setStatus(notice ? 'error' : 'idle');
+    setStatusMessage(notice);
+  }
+
+  function handleRemoveAttachment(index: number) {
+    setAttachments((current) => current.filter((_, fileIndex) => fileIndex !== index));
+    setStatus('idle');
+    setStatusMessage('');
+  }
+
   async function handlePost() {
-    if (!exportedText.trim()) {
+    if (!exportedText.trim() && attachments.length === 0) {
       return;
     }
 
     setStatus('posting');
-    setStatusMessage('Posting through LinkedIn...');
+    setStatusMessage(attachments.length > 0 ? 'Uploading media and posting through LinkedIn...' : 'Posting through LinkedIn...');
 
-    if (await onPost(exportedText)) {
+    if (await onPost(exportedText, attachments)) {
+      setAttachments([]);
       setStatus('posted');
       setStatusMessage('Posted');
       return;
@@ -215,11 +286,61 @@ export function LinkedInComposerOverlay({ open, onClose, onPost }: LinkedInCompo
           />
           <HelpPanel />
         </div>
+        {attachments.length > 0 ? (
+          <div className="lipf-attachments" aria-label="Attached media">
+            {attachments.map((file, index) => (
+              <div key={`${file.name}-${file.size}-${index}`} className="lipf-attachment">
+                {attachmentPreviews[index] ? (
+                  <img src={attachmentPreviews[index]} alt={file.name} />
+                ) : (
+                  <span className="lipf-attachment-video" aria-hidden="true">
+                    <Film size={22} />
+                  </span>
+                )}
+                <span className="lipf-attachment-name">{file.name}</span>
+                <button
+                  type="button"
+                  className="lipf-attachment-remove"
+                  aria-label={`Remove ${file.name}`}
+                  disabled={status === 'posting'}
+                  onClick={() => handleRemoveAttachment(index)}
+                >
+                  <X aria-hidden="true" size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <footer className="lipf-footer">
           <p className={`lipf-status is-${status}`} role="status">{statusMessage || copyStatus.message}</p>
           <div className="lipf-footer-actions">
+            <input
+              ref={mediaInputRef}
+              className="lipf-media-input"
+              type="file"
+              accept="image/*,video/*"
+              multiple
+              onChange={(event) => {
+                handleAddMediaFiles(event.target.files);
+                event.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              className="lipf-secondary-button"
+              disabled={status === 'posting'}
+              onClick={() => mediaInputRef.current?.click()}
+            >
+              <ImagePlus aria-hidden="true" size={16} />
+              Add media
+            </button>
             <button type="button" className="lipf-secondary-button" disabled={!exportedText} onClick={handleCopy}>Copy for LinkedIn</button>
-            <button type="button" className="lipf-primary-button" disabled={!exportedText.trim() || status === 'posting'} onClick={() => void handlePost()}>
+            <button
+              type="button"
+              className="lipf-primary-button"
+              disabled={(!exportedText.trim() && attachments.length === 0) || status === 'posting'}
+              onClick={() => void handlePost()}
+            >
               <Send aria-hidden="true" size={16} />
               Post
             </button>

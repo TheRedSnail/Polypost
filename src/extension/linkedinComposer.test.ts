@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  attachFilesToLinkedInComposer,
   closeNativeLinkedInComposer,
   dismissNativeComposerDiscardConfirmation,
   findLinkedInComposer,
+  findLinkedInMediaAttachedIndicator,
+  findLinkedInMediaFileInput,
+  findLinkedInMediaNextButton,
   findLinkedInPostButton,
   findNativeComposerDialog,
   getLinkedInComposerAnchor,
@@ -24,7 +28,29 @@ function mockVisible(element: HTMLElement) {
   });
 }
 
+// jsdom does not implement DataTransfer, so media tests stub a minimal version.
+function stubDataTransfer() {
+  class FakeDataTransfer {
+    private fileList: File[] = [];
+
+    items = {
+      add: (file: File) => {
+        this.fileList.push(file);
+      },
+    };
+
+    get files() {
+      return this.fileList as unknown as FileList;
+    }
+  }
+
+  vi.stubGlobal('DataTransfer', FakeDataTransfer);
+}
+
 describe('linkedinComposer helpers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
   it('finds a visible LinkedIn modal composer', () => {
     document.body.innerHTML = `
       <div role="dialog">
@@ -164,6 +190,132 @@ describe('linkedinComposer helpers', () => {
     nativePost!.disabled = false;
 
     expect(findLinkedInPostButton()).toBe(nativePost);
+  });
+
+  it('prefers the media file input inside the composer dialog and skips the extension root', () => {
+    document.body.innerHTML = `
+      <div id="linkedin-post-formatter-extension-root">
+        <input type="file" accept="image/*,video/*" />
+      </div>
+      <input type="file" accept="image/*" id="stray-input" />
+      <div role="dialog">
+        <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+        <input type="file" accept="image/*,video/*" id="dialog-input" />
+        <button type="button">Post</button>
+      </div>
+    `;
+    const editor = document.querySelector<HTMLElement>('.ql-editor');
+    mockVisible(editor!);
+
+    expect(findLinkedInMediaFileInput()).toBe(document.querySelector('#dialog-input'));
+  });
+
+  it('ignores file inputs that only accept non-media types', () => {
+    document.body.innerHTML = '<input type="file" accept=".pdf,.doc" />';
+
+    expect(findLinkedInMediaFileInput()).toBeNull();
+  });
+
+  it('attaches files through the media input and dispatches a change event', () => {
+    document.body.innerHTML = `
+      <div role="dialog">
+        <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+        <input type="file" accept="image/*,video/*" />
+        <button type="button">Post</button>
+      </div>
+    `;
+    const editor = document.querySelector<HTMLElement>('.ql-editor');
+    mockVisible(editor!);
+    stubDataTransfer();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    const changeHandler = vi.fn();
+    input!.addEventListener('change', changeHandler);
+
+    const file = new File(['pixels'], 'photo.png', { type: 'image/png' });
+
+    expect(attachFilesToLinkedInComposer([file])).toBe(true);
+
+    expect(changeHandler).toHaveBeenCalledTimes(1);
+    expect(input!.files).toHaveLength(1);
+    expect(input!.files![0].name).toBe('photo.png');
+  });
+
+  it('falls back to a simulated drop on the composer when no file input exists', () => {
+    document.body.innerHTML = `
+      <div role="dialog">
+        <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+      </div>
+    `;
+    const editor = document.querySelector<HTMLElement>('.ql-editor');
+    mockVisible(editor!);
+    stubDataTransfer();
+    const droppedFiles: File[] = [];
+    editor!.addEventListener('drop', (event) => {
+      const transfer = (event as DragEvent).dataTransfer;
+      droppedFiles.push(...Array.from(transfer?.files ?? []));
+    });
+
+    const file = new File(['frames'], 'clip.mp4', { type: 'video/mp4' });
+
+    expect(attachFilesToLinkedInComposer([file])).toBe(true);
+
+    expect(droppedFiles).toHaveLength(1);
+    expect(droppedFiles[0].name).toBe('clip.mp4');
+  });
+
+  it('finds the enabled media editor Next button and skips disabled or extension buttons', () => {
+    document.body.innerHTML = `
+      <div id="linkedin-post-formatter-extension-root">
+        <div role="dialog"><button type="button">Next</button></div>
+      </div>
+      <div role="dialog" id="media-editor">
+        <button type="button" disabled>Next</button>
+      </div>
+    `;
+    mockVisible(document.querySelector<HTMLElement>('#media-editor')!);
+
+    expect(findLinkedInMediaNextButton()).toBeNull();
+
+    const nativeNext = document.querySelector<HTMLButtonElement>('#media-editor button');
+    nativeNext!.disabled = false;
+
+    expect(findLinkedInMediaNextButton()).toBe(nativeNext);
+  });
+
+  it('ignores Done buttons inside hidden or video.js dialogs', () => {
+    document.body.innerHTML = `
+      <div role="dialog" class="vjs-modal-dialog vjs-text-track-settings" id="vjs-dialog">
+        <button type="button">Done</button>
+      </div>
+      <div role="dialog" id="hidden-dialog">
+        <button type="button">Next</button>
+      </div>
+    `;
+    // The vjs dialog is "visible" but carries video.js classes; the other
+    // dialog has no layout box (jsdom default zero rect).
+    mockVisible(document.querySelector<HTMLElement>('#vjs-dialog')!);
+
+    expect(findLinkedInMediaNextButton()).toBeNull();
+  });
+
+  it('detects the inline media-attached indicator in the composer dialog', () => {
+    document.body.innerHTML = `
+      <div role="dialog">
+        <div class="ql-editor" contenteditable="true" data-placeholder="What do you want to talk about?"></div>
+        <button type="button">Post</button>
+      </div>
+    `;
+    const editor = document.querySelector<HTMLElement>('.ql-editor');
+    mockVisible(editor!);
+
+    expect(findLinkedInMediaAttachedIndicator()).toBeNull();
+
+    const removeMedia = document.createElement('button');
+    removeMedia.type = 'button';
+    removeMedia.textContent = 'Remove media';
+    document.querySelector('[role="dialog"]')!.append(removeMedia);
+
+    expect(findLinkedInMediaAttachedIndicator()).toBe(removeMedia);
   });
 
   it('writes text and dispatches input and change events', () => {

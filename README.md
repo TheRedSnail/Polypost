@@ -29,6 +29,7 @@ This is not an official LinkedIn app. Drafts stay in your browser; the extension
 - One-click copy with a fallback for browsers that block the Clipboard API.
 - Local draft autosave, reset/recovery behavior, and saved drafts.
 - Extension: one-click publish through LinkedIn's native composer, with the native composer kept hidden so the formatter feels like the real post box.
+- Extension: attach images (up to 20) or a single video; media is handed to LinkedIn's own upload flow when you click Post.
 - GitHub Actions workflow for GitHub Pages deployment.
 
 ## Local Development
@@ -64,7 +65,7 @@ The extension turns the LinkedIn composer into the formatter. Clicking **Start a
 
 - A content script (`src/extension/content-script.tsx`) runs on `linkedin.com`, mounts the formatter UI, and listens for clicks on LinkedIn's **Start a post** control.
 - LinkedIn renders its composer inside a **shadow root**, so the script pierces shadow boundaries to find the composer, suppress it (CSS `visibility:hidden` while you edit, so its focus trap cannot steal focus from the formatter), and drive it.
-- On **Post**, the script briefly makes the hidden composer focusable, inserts the exported text, waits for LinkedIn's Post button to enable, clicks it, and confirms the composer closed.
+- On **Post**, the script briefly makes the hidden composer focusable, hands any attached images/videos to LinkedIn's media upload input (confirming the media editor's **Next** step), inserts the exported text, waits for LinkedIn's Post button to enable, clicks it, and confirms the composer closed.
 - A service worker (`src/extension/public/background.js`) re-injects the script if you click the toolbar icon on a LinkedIn tab.
 
 ### Permissions
@@ -92,17 +93,6 @@ npm run package:extension
 ```
 
 This builds the extension and writes `release/linkedin-post-formatter-v<version>.zip` with `manifest.json` at the archive root, ready to upload.
-
-### Publish to the Chrome Web Store
-
-1. Bump `version` in **both** `src/extension/manifest.json` and `package.json` (they must match), then run `npm run package:extension`.
-2. Sign in to the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole/) (one-time US$5 developer registration fee).
-3. Click **Add new item** and upload the zip from `release/`.
-4. Complete the store listing: name, summary, detailed description, category (Social & Communication), at least one 1280×800 or 640×400 screenshot, and the 128×128 icon (already in the package).
-5. Fill in the **Privacy** tab: a single purpose ("format and publish LinkedIn posts"), justifications for the `clipboardWrite`, `scripting`, and host permissions, and a privacy policy URL. Because no data leaves the browser, the data-use disclosures are "does not collect."
-6. Submit for review. Review typically takes a few business days; you will be emailed when it is published or if changes are requested.
-
-The same zip works for the [Microsoft Edge Add-ons](https://partner.microsoft.com/dashboard/microsoftedge/) store.
 
 ### Regenerate icons
 

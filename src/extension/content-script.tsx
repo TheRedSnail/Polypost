@@ -4,10 +4,13 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { LinkedInComposerOverlay } from './LinkedInComposerOverlay';
 import {
+  attachFilesToLinkedInComposer,
   clickLinkedInControl,
   closeNativeLinkedInComposer,
   dismissNativeComposerDiscardConfirmation,
   findLinkedInComposer,
+  findLinkedInMediaAttachedIndicator,
+  findLinkedInMediaNextButton,
   findLinkedInPostButton,
   findNativeComposerDialog,
   findNativeComposerDialogs,
@@ -37,6 +40,12 @@ const HIDE_LOOP_INTERVAL_MS = 150;
 const DISMISS_LOOP_INTERVAL_MS = 100;
 const DISMISS_TIMEOUT_MS = 3000;
 const POSTED_DIALOG_CLOSE_TIMEOUT_MS = 8000;
+// Media flows are slower: uploads must register (the "Remove media" indicator
+// or a media editor's Next step) before text can be inserted, and video
+// uploads/processing gate the Post button.
+const MEDIA_ATTACH_TIMEOUT_MS = 60000;
+const MEDIA_POST_BUTTON_TIMEOUT_MS = 90000;
+const MEDIA_POSTED_DIALOG_CLOSE_TIMEOUT_MS = 30000;
 const LOG_PREFIX = '[LIPF]';
 
 function log(...args: unknown[]) {
@@ -154,8 +163,8 @@ function closeFormatter() {
   closeNativeComposer();
 }
 
-async function postThroughLinkedIn(text: string): Promise<boolean> {
-  log('postThroughLinkedIn start, textLength:', text.length);
+async function postThroughLinkedIn(text: string, files: File[]): Promise<boolean> {
+  log('postThroughLinkedIn start, textLength:', text.length, 'files:', files.length);
   isBridgingToNativeComposer = true;
 
   // The formatter stays open ("Posting...") and the native composer stays
@@ -192,15 +201,58 @@ async function postThroughLinkedIn(text: string): Promise<boolean> {
     // composer is still invisible (opacity:0); the formatter shows "Posting...".
     suppressNativeComposer('focusable');
 
-    const wrote = setLinkedInComposerText(composer, text);
-    log('setLinkedInComposerText result:', wrote);
+    if (files.length > 0) {
+      const attached = attachFilesToLinkedInComposer(files);
+      log('attachFilesToLinkedInComposer result:', attached);
 
-    if (!wrote) {
-      log('FAILED: could not write text');
-      return false;
+      if (!attached) {
+        log('FAILED: could not attach media');
+        return false;
+      }
+
+      // Wait until the upload registers. The redesigned composer attaches
+      // inline (a "Remove media" control appears); older variants open a media
+      // editor whose Next/Done must be clicked to return to the share view.
+      const mediaAttached = await waitForMediaAttached();
+      log('media attached:', mediaAttached);
+
+      if (!mediaAttached) {
+        log('FAILED: media never attached');
+        return false;
+      }
+
+      // Media processing can re-render the editor, so re-acquire it.
+      composer = findLinkedInComposer() ?? composer;
     }
 
-    const postButton = await waitForLinkedInPostButton();
+    if (text.trim()) {
+      let wrote = setLinkedInComposerText(composer, text);
+      log('setLinkedInComposerText result:', wrote);
+
+      if (wrote && files.length > 0) {
+        // Late media re-renders can wipe freshly inserted text; verify it
+        // stuck and re-insert once if not.
+        await wait(800);
+        const current = findLinkedInComposer() ?? composer;
+
+        if (!composerContainsText(current, text)) {
+          log('text wiped by media re-render, re-inserting');
+          composer = current;
+          wrote = setLinkedInComposerText(composer, text);
+          log('setLinkedInComposerText retry result:', wrote);
+        }
+      }
+
+      if (!wrote) {
+        log('FAILED: could not write text');
+        return false;
+      }
+    }
+
+    const postButton = await waitForElement(
+      findLinkedInPostButton,
+      files.length > 0 ? MEDIA_POST_BUTTON_TIMEOUT_MS : 3500,
+    );
     log('native Post button enabled:', Boolean(postButton));
 
     if (!postButton) {
@@ -210,7 +262,10 @@ async function postThroughLinkedIn(text: string): Promise<boolean> {
 
     clickLinkedInControl(postButton);
 
-    const composerClosed = await waitForElementGone(findNativeComposerDialog, POSTED_DIALOG_CLOSE_TIMEOUT_MS);
+    const composerClosed = await waitForElementGone(
+      findNativeComposerDialog,
+      files.length > 0 ? MEDIA_POSTED_DIALOG_CLOSE_TIMEOUT_MS : POSTED_DIALOG_CLOSE_TIMEOUT_MS,
+    );
     log('native composer closed after post:', composerClosed);
 
     isFormatterOpen = false;
@@ -262,8 +317,34 @@ async function waitForLinkedInComposer() {
   return waitForElement(findLinkedInComposer, 3500);
 }
 
-async function waitForLinkedInPostButton() {
-  return waitForElement(findLinkedInPostButton, 3500);
+// Resolves true once media is attached to the composer. Clicks through a media
+// editor's Next/Done step if one appears along the way.
+async function waitForMediaAttached(): Promise<boolean> {
+  const deadline = Date.now() + MEDIA_ATTACH_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (findLinkedInMediaAttachedIndicator()) {
+      return true;
+    }
+
+    const nextButton = findLinkedInMediaNextButton();
+
+    if (nextButton) {
+      log('clicking media editor Next/Done');
+      clickLinkedInControl(nextButton);
+      await wait(500);
+      continue;
+    }
+
+    await wait(200);
+  }
+
+  return Boolean(findLinkedInMediaAttachedIndicator());
+}
+
+function composerContainsText(composer: HTMLElement, text: string): boolean {
+  const probe = text.trim().slice(0, 40);
+  return (composer.textContent ?? '').includes(probe);
 }
 
 function wait(milliseconds: number) {

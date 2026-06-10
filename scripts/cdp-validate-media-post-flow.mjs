@@ -1,6 +1,7 @@
-// End-to-end validation of the formatter -> native composer -> Post bridge.
-// Publishes a real post (full validation, per project policy), then deletes it
-// immediately via the Voyager API.
+// End-to-end validation of the media attachment flow: attach a generated test
+// image in the formatter, post through the native composer bridge (media file
+// input -> media editor Next -> text -> Post), then delete the published post
+// immediately via the Voyager API (per project policy).
 const targets = await (await fetch('http://127.0.0.1:9222/json/list')).json();
 const target = targets.find((candidate) => candidate.type === 'page' && candidate.url.includes('linkedin.com'));
 
@@ -69,7 +70,7 @@ await new Promise((resolve, reject) => {
 await call('Runtime.enable');
 await call('Page.enable');
 
-const marker = `LIPF bridge test ${Math.random().toString(36).slice(2, 8)}`;
+const marker = `LIPF media test ${Math.random().toString(36).slice(2, 8)}`;
 console.log('test marker:', marker);
 
 // Preserve whatever draft the user had, then seed the test draft.
@@ -77,8 +78,7 @@ const originalDraft = await evaluate(`localStorage.getItem('linkedin-format:draf
 const draft = {
   type: 'doc',
   content: [
-    { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Bridge Test' }] },
-    { type: 'paragraph', content: [{ type: 'text', text: `${marker} - automated, deleting momentarily.` }] },
+    { type: 'paragraph', content: [{ type: 'text', text: `${marker} - automated media validation, deleting momentarily.` }] },
   ],
 };
 await evaluate(`localStorage.setItem('linkedin-format:draft-v1', ${JSON.stringify(JSON.stringify(draft))}); true`);
@@ -108,8 +108,6 @@ if (!mounted) {
 }
 
 // Step 1: click "Start a post" -> formatter should take over.
-// Synthetic click: trusted CDP input is dropped when the window is occluded,
-// and the extension's capture listener handles synthetic clicks identically.
 const startClicked = await evaluate(String.raw`(() => {
   const control = Array.from(document.querySelectorAll('button, [role="button"]')).find((element) => {
     const label = ((element.textContent ?? '') + ' ' + (element.getAttribute('aria-label') ?? '')).toLowerCase();
@@ -145,7 +143,47 @@ if (!formatterOpen) {
 
 await sleep(1500);
 
-// Step 2: click the formatter's Post button.
+// Step 2: generate a PNG in-page and attach it through the formatter's media input.
+const attached = await evaluate(String.raw`(async () => {
+  const input = document.querySelector('#linkedin-post-formatter-extension-root .lipf-media-input');
+  if (!input) return { ok: false, reason: 'media input not found' };
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 360;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#0a66c2';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#ffffff';
+  context.font = 'bold 36px sans-serif';
+  context.fillText('LIPF media validation', 40, 180);
+
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+  const file = new File([blob], 'lipf-media-test.png', { type: 'image/png' });
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  input.files = transfer.files;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  return { ok: true };
+})()`);
+
+console.log('attach via formatter input:', JSON.stringify(attached));
+
+if (!attached.ok) {
+  console.error('FAIL: could not attach test image.');
+  process.exit(1);
+}
+
+await sleep(500);
+const thumbnailCount = await evaluate(`document.querySelectorAll('#linkedin-post-formatter-extension-root .lipf-attachment').length`);
+console.log('attachment thumbnails shown:', thumbnailCount);
+
+if (thumbnailCount !== 1) {
+  console.error('FAIL: attachment thumbnail did not appear.');
+  process.exit(1);
+}
+
+// Step 3: click the formatter's Post button.
 const postClicked = await evaluate(String.raw`(() => {
   const button = document.querySelector('#linkedin-post-formatter-extension-root .lipf-primary-button');
   if (!button || button.disabled) return false;
@@ -159,15 +197,16 @@ if (!postClicked) {
   process.exit(1);
 }
 
-// Step 3: wait for the success toast / posted update link.
+// Step 4: wait for the posted update link. Media uploads make this slower than
+// the text-only flow, so poll for up to 90 seconds.
 let shareUrn = null;
 
-for (let attempt = 0; attempt < 30; attempt += 1) {
+for (let attempt = 0; attempt < 180; attempt += 1) {
   await sleep(500);
   shareUrn = await evaluate(String.raw`(() => {
     const links = Array.from(document.querySelectorAll('a[href*="/feed/update/"]')).map((a) => a.href);
     for (const href of links) {
-      const match = decodeURIComponent(href).match(/urn:li:share:\d+/);
+      const match = decodeURIComponent(href).match(/urn:li:(?:share|ugcPost|activity):\d+/);
       if (match) return match[0];
     }
     return null;
@@ -180,34 +219,39 @@ for (let attempt = 0; attempt < 30; attempt += 1) {
 
 console.log('posted share urn:', shareUrn);
 
-// Step 4: make sure the formatter does not reappear (the original bug).
+// Step 5: make sure the formatter does not reappear.
 await sleep(4000);
 const formatterReappeared = await evaluate(`Boolean(document.querySelector('#linkedin-post-formatter-extension-root .lipf-panel'))`);
 console.log('formatter reappeared:', formatterReappeared);
 
-// Step 5: verify the published post contains the marker, then delete it immediately.
+// Step 6: verify the published post contains the marker and an uploaded image,
+// then delete it. Deletion is unconditional: the URN came from OUR post's
+// success toast, so it is always removed regardless of verification outcome.
 let postVerified = false;
+let imageVerified = false;
 let deleteStatus = null;
 
 if (shareUrn) {
-  // Deletion is unconditional: the URN came from OUR post's success toast, so
-  // it is always removed regardless of verification outcome.
   const verifyAndDelete = await evaluate(String.raw`(async () => {
     const page = await fetch('https://www.linkedin.com/feed/update/${shareUrn}/', { credentials: 'include' });
     const html = await page.text();
     const hasMarker = html.includes(${JSON.stringify(marker)});
+    // Uploaded post images live under feedshare paths; avatars do not.
+    const hasImage = /feedshare/.test(html);
     const jsession = document.cookie.split('; ').find((cookie) => cookie.startsWith('JSESSIONID='));
     const csrf = jsession ? jsession.split('=')[1].replace(/"/g, '') : null;
-    const del = await fetch('https://www.linkedin.com/voyager/api/contentcreation/normShares/' + encodeURIComponent('${shareUrn}'), {
+    const shareId = '${shareUrn}'.split(':').pop();
+    const del = await fetch('https://www.linkedin.com/voyager/api/contentcreation/normShares/' + encodeURIComponent('urn:li:share:' + shareId), {
       method: 'DELETE',
       credentials: 'include',
       headers: { 'csrf-token': csrf, 'x-restli-protocol-version': '2.0.0' },
     });
-    return { hasMarker, deleteStatus: del.status };
+    return { hasMarker, hasImage, deleteStatus: del.status };
   })()`);
   postVerified = verifyAndDelete.hasMarker;
+  imageVerified = verifyAndDelete.hasImage;
   deleteStatus = verifyAndDelete.deleteStatus;
-  console.log('post contains marker:', postVerified, '| delete status:', deleteStatus);
+  console.log('post contains marker:', postVerified, '| post has image:', imageVerified, '| delete status:', deleteStatus);
 
   if (deleteStatus === 204) {
     const gone = await evaluate(String.raw`(async () => {
@@ -229,7 +273,7 @@ if (originalDraft === null) {
 console.log('=== [LIPF] LOGS ===');
 console.log(logs.join('\n'));
 
-const passed = formatterOpen && Boolean(shareUrn) && postVerified && deleteStatus === 204 && !formatterReappeared;
+const passed = formatterOpen && Boolean(shareUrn) && postVerified && imageVerified && deleteStatus === 204 && !formatterReappeared;
 console.log(passed ? 'VALIDATION PASSED' : 'VALIDATION FAILED');
 socket.close();
 process.exit(passed ? 0 : 1);
