@@ -313,6 +313,7 @@
   flex-direction: column;
   background: #f3f2ef;
   overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .lipf-full-workspace > .preview-stack,
@@ -380,7 +381,7 @@
 
 .editor-shell {
   display: flex;
-  min-height: 590px;
+  min-height: clamp(330px, calc(100vh - 330px), 430px);
   flex: 0 0 auto;
   flex-direction: column;
   border: 1px solid rgba(100, 116, 139, 0.22);
@@ -692,7 +693,7 @@
 }
 
 .rich-editor-content {
-  min-height: 560px;
+  min-height: clamp(210px, calc(100vh - 460px), 290px);
   padding: 22px 24px 32px;
   outline: none;
   color: #1f2937;
