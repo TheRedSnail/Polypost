@@ -16,8 +16,9 @@ export function HelpContent() {
             button that drops the customization and follows the main draft again.
           </li>
           <li>
-            Cards with more than one feed cutoff (LinkedIn) offer a Desktop/Mobile toggle; the "more…"/"less…" markers
-            estimate the collapsed feed view. Cutoffs vary by device and layout, so treat them as approximations.
+            Cards start expanded, showing the full post. Where a platform collapses long posts (LinkedIn), a
+            Desktop/Mobile toggle and the "more…"/"less…" markers estimate the collapsed feed view — treat them as
+            approximations, since cutoffs vary by device and layout.
           </li>
           <li>Previews are visual approximations; real feed-card rendering requires each platform's APIs this static app cannot call.</li>
         </ul>
@@ -50,6 +51,10 @@ export function HelpContent() {
       <section className="help-section">
         <h3>Per-platform formatting</h3>
         <ul className="help-list">
+          <li>
+            Newlines map 1:1 to the post, like LinkedIn's composer: press Enter for a new line and again for a blank
+            line. The editor's spacing matches the previews exactly — blank lines come only from the empty lines you add.
+          </li>
           <li>
             LinkedIn keeps styled Unicode (bold/italic/underline). X, Bluesky, Threads, Facebook, and Instagram show
             plain text, since styled Unicode counts against limits and hurts reach and screen-reader accessibility.
