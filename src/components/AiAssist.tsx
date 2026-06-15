@@ -38,13 +38,25 @@ export function AiAssist({ ready, busy, error, onSubmit, onOpenSettings, hasDraf
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Grow the box to fit its content (typed or recalled from history), capped by a
-  // max-height in CSS beyond which it scrolls.
+  // max-height in CSS beyond which it scrolls. scrollHeight excludes the border,
+  // and box-sizing is border-box, so add the border back — otherwise the content
+  // is ~2px too tall for the height we set and a scrollbar appears on one line.
   useLayoutEffect(() => {
     const el = textareaRef.current;
-    if (el) {
-      el.style.height = 'auto';
-      el.style.height = `${el.scrollHeight}px`;
+    if (!el) {
+      return;
     }
+
+    el.style.height = 'auto';
+    const style = getComputedStyle(el);
+    const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    const maxHeight = parseFloat(style.maxHeight);
+    const fullHeight = el.scrollHeight + border;
+    const capped = Number.isFinite(maxHeight) ? Math.min(fullHeight, maxHeight) : fullHeight;
+
+    el.style.height = `${capped}px`;
+    // Only show a scrollbar once the content actually exceeds the max height.
+    el.style.overflowY = Number.isFinite(maxHeight) && fullHeight > maxHeight ? 'auto' : 'hidden';
   }, [instruction]);
 
   useEffect(() => {

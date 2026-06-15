@@ -407,7 +407,9 @@ h2 {
   font-size: 0.9rem;
   line-height: 1.4;
   resize: none;
-  overflow-y: auto;
+  /* Default hidden; the auto-grow effect flips to auto only when content exceeds
+     max-height. Prevents a spurious scrollbar on a single-line prompt. */
+  overflow-y: hidden;
 }
 
 /* Compact Generate button so it doesn't tower over the input. The extra class
