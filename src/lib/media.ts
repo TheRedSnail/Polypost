@@ -8,6 +8,19 @@
 // each card as a download/drag affordance for this session; reload clears them.
 export type AttachmentKind = 'image' | 'video' | 'link';
 
+// Cached link-unfurl metadata (Open Graph) for a link attachment. Fetched once via
+// the microlink service and persisted with the link so the per-platform preview
+// cards survive a reload without re-fetching. `manual` marks a user override that
+// the auto-fetch must never clobber. Image/logo are remote URLs, not blobs.
+export interface LinkPreview {
+  status: 'loading' | 'ready' | 'failed' | 'manual';
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  logoUrl?: string;
+  siteName?: string;
+}
+
 export interface Attachment {
   id: string;
   kind: AttachmentKind;
@@ -15,11 +28,24 @@ export interface Attachment {
   name: string;
   // Link only: the URL folded into post text and shown as a chip.
   url?: string;
+  // Link only: cached unfurl metadata for the per-platform preview cards.
+  preview?: LinkPreview;
   // Image/video only (session): the in-memory blob URL and originating file.
   objectUrl?: string;
   file?: File;
   mime?: string;
   size?: number;
+}
+
+export interface StoredAttachment {
+  id: string;
+  kind: AttachmentKind;
+  name: string;
+  url?: string;
+  preview?: LinkPreview;
+  mime?: string;
+  size?: number;
+  dataUrl?: string;
 }
 
 const MEDIA_KEY = 'omnipost:media-v1';
@@ -95,9 +121,26 @@ export function isLinkAttachment(attachment: Attachment): boolean {
   return attachment.kind === 'link';
 }
 
+// The hostname for a URL's domain row (e.g. "www.example.com" → "example.com"),
+// falling back to the raw string when it can't be parsed.
+export function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+// A favicon URL for a link's domain — reuses the DuckDuckGo icon service the
+// Sources panel already relies on, so no new third party is introduced.
+export function faviconUrl(url: string): string {
+  const host = hostnameOf(url);
+  return `https://icons.duckduckgo.com/ip3/${host}.ico`;
+}
+
 // The URLs (in order) that get folded into each platform's post text + count.
 export function linkUrls(attachments: Attachment[]): string[] {
-  return attachments.filter((a) => a.kind === 'link' && a.url).map((a) => a.url as string);
+  return attachments.filter((a) => a.kind === 'link' && a.url).slice(0, 1).map((a) => a.url as string);
 }
 
 // The trailing block appended to a platform's post text — one URL per line, set
@@ -121,7 +164,17 @@ export function loadAttachments(): Attachment[] {
     }
 
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Attachment[]).filter((a) => a.kind === 'link' && a.url) : [];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return (parsed as Attachment[])
+      .filter((a) => a.kind === 'link' && a.url)
+      .slice(0, 1)
+      // A persisted "loading" means the tab closed mid-fetch — drop it so the
+      // fetch-on-need effect retries instead of leaving a stuck skeleton.
+      .map((a) => (a.preview?.status === 'loading' ? { ...a, preview: undefined } : a));
   } catch {
     return [];
   }
@@ -135,9 +188,106 @@ export function saveAttachments(attachments: Attachment[]): void {
   try {
     const links = attachments
       .filter((a) => a.kind === 'link' && a.url)
-      .map((a) => ({ id: a.id, kind: a.kind, name: a.name, url: a.url }));
+      .slice(0, 1)
+      .map((a) => ({ id: a.id, kind: a.kind, name: a.name, url: a.url, preview: a.preview }));
     window.localStorage.setItem(MEDIA_KEY, JSON.stringify(links));
   } catch {
     // Non-fatal: attachments still work in memory for this session.
   }
+}
+
+export async function serializeAttachmentsForDraft(attachments: Attachment[]): Promise<StoredAttachment[]> {
+  const stored: StoredAttachment[] = [];
+
+  for (const attachment of attachments.slice(0, 1)) {
+    if (attachment.kind === 'link' && attachment.url) {
+      stored.push({ id: attachment.id, kind: attachment.kind, name: attachment.name, url: attachment.url, preview: attachment.preview });
+      continue;
+    }
+
+    const dataUrl = await attachmentDataUrl(attachment);
+
+    if (dataUrl) {
+      stored.push({
+        id: attachment.id,
+        kind: attachment.kind,
+        name: attachment.name,
+        mime: attachment.mime,
+        size: attachment.size,
+        dataUrl,
+      });
+    }
+  }
+
+  return stored;
+}
+
+export function restoreDraftAttachments(stored: StoredAttachment[] = []): Attachment[] {
+  const attachments: Attachment[] = [];
+
+  for (const attachment of stored.slice(0, 1)) {
+    if (attachment.kind === 'link' && attachment.url) {
+      attachments.push({ id: attachment.id, kind: 'link', name: attachment.name, url: attachment.url, preview: attachment.preview });
+      continue;
+    }
+
+    if (!attachment.dataUrl || (attachment.kind !== 'image' && attachment.kind !== 'video')) {
+      continue;
+    }
+
+    const file = fileFromDataUrl(attachment.dataUrl, attachment.name, attachment.mime);
+    const objectUrl = URL.createObjectURL(file);
+
+    attachments.push({
+      id: attachment.id,
+      kind: attachment.kind,
+      name: attachment.name,
+      objectUrl,
+      file,
+      mime: file.type,
+      size: file.size,
+    });
+  }
+
+  return attachments;
+}
+
+async function attachmentDataUrl(attachment: Attachment): Promise<string | undefined> {
+  if (attachment.file) {
+    return blobToDataUrl(attachment.file);
+  }
+
+  if (!attachment.objectUrl) {
+    return undefined;
+  }
+
+  try {
+    const response = await fetch(attachment.objectUrl);
+    const blob = await response.blob();
+    return blobToDataUrl(blob);
+  } catch {
+    return undefined;
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')));
+    reader.addEventListener('error', () => reject(reader.error ?? new Error('Could not read attachment.')));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function fileFromDataUrl(dataUrl: string, name: string, mime = 'application/octet-stream'): File {
+  const [header, data = ''] = dataUrl.split(',', 2);
+  const type = /data:([^;]+)/.exec(header)?.[1] ?? mime;
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new File([bytes], name, { type });
 }

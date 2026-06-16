@@ -7,6 +7,7 @@ import { parseMentionSegments } from '../lib/mentions';
 import type { Attachment } from '../lib/media';
 import type { PlatformRender, PlatformSpec } from '../lib/platforms/types';
 import { collapseToPreview, isTextTruncated, type PreviewMode } from '../lib/truncation';
+import { CardLinkPreview } from './CardLinkPreview';
 import { CharacterMeter } from './CharacterMeter';
 import { PaneEditor } from './PaneEditor';
 import { PLATFORM_ICONS } from './platformIcons';
@@ -82,6 +83,12 @@ export function PlatformCard({
   // The flattened mention strings present in this platform's text, so they can be
   // highlighted in the preview the same way the editor highlights @[Name] tokens.
   const mentionStrings = useMemo(() => collectMentionStrings(document, spec), [document, spec]);
+  // The first shared link drives this platform's unfurl preview card (platforms
+  // unfurl a single URL); any additional links still show as chips below.
+  const firstLink = useMemo(
+    () => attachments.find((attachment) => attachment.kind === 'link' && attachment.url),
+    [attachments],
+  );
 
   const [copyFlash, setCopyFlash] = useState<CopyFlash>('idle');
   const flashTimer = useRef<number | null>(null);
@@ -205,6 +212,8 @@ export function PlatformCard({
           </p>
         )}
       </div>
+
+      {!isEditing && firstLink ? <CardLinkPreview link={firstLink} spec={spec} /> : null}
 
       {!isEditing ? <CardAttachments attachments={attachments} platformLabel={spec.label} /> : null}
 

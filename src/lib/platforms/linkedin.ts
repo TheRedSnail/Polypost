@@ -26,4 +26,6 @@ export const linkedinSpec: PlatformSpec = {
     openComposer: { url: () => LINKEDIN_COMPOSER_URL, prefillsText: false },
   },
   warnings: [],
+  // LinkedIn shows a compact thumbnail card with the title and domain (no description).
+  linkPreview: { show: true, layout: 'thumbnail', showDescription: false },
 };

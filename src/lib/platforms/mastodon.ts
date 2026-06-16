@@ -19,5 +19,8 @@ export const mastodonSpec: PlatformSpec = {
     copy: true,
   },
   warnings: [],
+  // Mastodon renders a compact card: small thumbnail on the left, title,
+  // description, and domain on the right.
+  linkPreview: { show: true, layout: 'thumbnail', showDescription: true },
   disclaimer: 'Links count as 23 characters. 500 is the default limit and can vary by instance.',
 };

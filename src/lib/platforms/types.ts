@@ -30,6 +30,21 @@ export interface PlatformSpec {
   // are removed ("@ScottHanselman") so handle-based platforms' autocomplete fires
   // on the whole name instead of splitting it at the space.
   keepMentionSpaces?: boolean;
+  // How this platform unfurls a shared link into a preview card. Data-only; the
+  // card UI reads it to mirror each platform's real layout. Absent ⇒ no preview.
+  linkPreview?: LinkCardStyle;
+}
+
+// Describes how a platform renders a link's unfurl card, so the preview matches
+// what the user will actually see once posted.
+export interface LinkCardStyle {
+  // false ⇒ the platform doesn't unfurl links (e.g. Instagram); show `note` instead.
+  show: boolean;
+  // 'large' ⇒ hero image on top; 'thumbnail' ⇒ small image on the left.
+  layout: 'large' | 'thumbnail';
+  showDescription: boolean;
+  // Explanation shown when show === false.
+  note?: string;
 }
 
 export interface PlatformCapabilities {

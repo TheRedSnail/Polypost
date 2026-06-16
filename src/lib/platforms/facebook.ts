@@ -22,4 +22,6 @@ export const facebookSpec: PlatformSpec = {
     openComposer: { url: () => 'https://www.facebook.com/', prefillsText: false },
   },
   warnings: [],
+  // Facebook shows a large image card with the domain, title, and description.
+  linkPreview: { show: true, layout: 'large', showDescription: true },
 };

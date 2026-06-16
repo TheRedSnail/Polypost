@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
-import { Check, Copy, Download, ImagePlus, Link2, Plus, X } from 'lucide-react';
+import { Check, Copy, Download, ImagePlus, Link2, Pencil, Plus, RotateCcw, X } from 'lucide-react';
 
-import { copyImageToClipboard, makeFileAttachment, makeLinkAttachment, type Attachment } from '../lib/media';
+import { copyImageToClipboard, makeFileAttachment, makeLinkAttachment, type Attachment, type LinkPreview } from '../lib/media';
 
 function handleMediaDragStart(event: React.DragEvent, attachment: Attachment) {
   if (attachment.objectUrl && attachment.mime) {
@@ -14,20 +14,24 @@ interface MediaTrayProps {
   attachments: Attachment[];
   onAddAttachment: (attachment: Attachment) => void;
   onRemoveAttachment: (id: string) => void;
+  onUpdateAttachment: (id: string, patch: Partial<Attachment>) => void;
 }
 
-export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment }: MediaTrayProps) {
+export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment, onUpdateAttachment }: MediaTrayProps) {
   const [showLink, setShowLink] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkTitle, setLinkTitle] = useState('');
+  const hasAttachment = attachments.length > 0;
 
   function handleFiles(event: React.ChangeEvent<HTMLInputElement>) {
     // Snapshot the files BEFORE clearing the input: event.target.files is a live
     // FileList, so resetting value would empty it before we read it.
-    const files = Array.from(event.target.files ?? []);
+    const file = event.target.files?.[0];
     event.target.value = '';
 
-    files.forEach((file) => onAddAttachment(makeFileAttachment(file)));
+    if (file) {
+      onAddAttachment(makeFileAttachment(file));
+    }
   }
 
   function handleAddLink() {
@@ -48,15 +52,15 @@ export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment }: 
       <summary>
         Images &amp; links{attachments.length ? ` (${attachments.length})` : ''}
       </summary>
-      <p className="media-hint">Add an image or a link once, then reuse it everywhere. Links fold into each platform's copied text automatically. For an image, click <strong>Copy image</strong> and paste it straight into the LinkedIn composer, or <strong>download</strong> / drag it into any other composer.</p>
+      <p className="media-hint">Attach one image or one link, matching LinkedIn's composer limit. Adding another replaces the current attachment. Links fold into each platform's copied text automatically.</p>
 
       <div className="media-actions">
-        <label className="secondary-action media-add media-file" title="Add an image">
-          <ImagePlus aria-hidden="true" size={13} /> Image
-          <input type="file" accept="image/*" multiple onChange={handleFiles} />
+        <label className="secondary-action media-add media-file" title={hasAttachment ? 'Replace with an image' : 'Add an image'}>
+          <ImagePlus aria-hidden="true" size={13} /> {hasAttachment ? 'Replace image' : 'Image'}
+          <input type="file" accept="image/*" onChange={handleFiles} />
         </label>
         <button type="button" className="secondary-action media-add" onClick={() => setShowLink((value) => !value)}>
-          <Link2 aria-hidden="true" size={13} /> Link
+          <Link2 aria-hidden="true" size={13} /> {hasAttachment ? 'Replace link' : 'Link'}
         </button>
       </div>
 
@@ -83,7 +87,7 @@ export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment }: 
             }}
           />
           <button type="button" className="primary-action media-add-confirm" disabled={!linkUrl.trim()} onClick={handleAddLink}>
-            <Plus aria-hidden="true" size={13} /> Add
+            <Plus aria-hidden="true" size={13} /> {hasAttachment ? 'Replace' : 'Add'}
           </button>
         </div>
       ) : null}
@@ -91,15 +95,25 @@ export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment }: 
       {attachments.length ? (
         <ul className="media-list">
           {attachments.map((attachment) => {
-            const isFile = attachment.kind !== 'link';
+            if (attachment.kind === 'link') {
+              return (
+                <MediaLinkItem
+                  key={attachment.id}
+                  attachment={attachment}
+                  onRemove={onRemoveAttachment}
+                  onUpdate={onUpdateAttachment}
+                />
+              );
+            }
 
+            // Only image/video files reach here — links render via MediaLinkItem above.
             return (
               <li
                 key={attachment.id}
                 className={`media-item is-${attachment.kind}`}
-                draggable={isFile && Boolean(attachment.objectUrl)}
+                draggable={Boolean(attachment.objectUrl)}
                 onDragStart={(event) => handleMediaDragStart(event, attachment)}
-                title={isFile ? `${attachment.name} — drag into a composer or download` : attachment.url}
+                title={`${attachment.name} — drag into a composer or download`}
               >
                 {attachment.kind === 'image' && attachment.objectUrl ? (
                   <img src={attachment.objectUrl} alt={attachment.name} className="media-thumb" />
@@ -110,7 +124,7 @@ export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment }: 
                 )}
                 <span className="media-item-name" title={attachment.url ?? attachment.name}>{attachment.name}</span>
                 {attachment.kind === 'image' ? <CopyImageButton attachment={attachment} /> : null}
-                {isFile && attachment.objectUrl ? (
+                {attachment.objectUrl ? (
                   <a className="media-download" href={attachment.objectUrl} download={attachment.name} aria-label={`Download ${attachment.name}`} title="Download">
                     <Download aria-hidden="true" size={14} />
                   </a>
@@ -124,6 +138,104 @@ export function MediaTray({ attachments, onAddAttachment, onRemoveAttachment }: 
         </ul>
       ) : null}
     </details>
+  );
+}
+
+const PREVIEW_STATUS_LABEL: Record<LinkPreview['status'], string> = {
+  loading: 'Loading preview…',
+  ready: 'Preview ready',
+  failed: "Couldn't fetch preview",
+  manual: 'Custom preview',
+};
+
+// A link row with its unfurl-preview status and an inline editor to override or
+// re-fetch the title/description/image each platform card shows.
+function MediaLinkItem({
+  attachment,
+  onRemove,
+  onUpdate,
+}: {
+  attachment: Attachment;
+  onRemove: (id: string) => void;
+  onUpdate: (id: string, patch: Partial<Attachment>) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const status = attachment.preview?.status ?? 'loading';
+
+  return (
+    <li className="media-item is-link">
+      <div className="media-link-row-main">
+        <span className="media-link-icon"><Link2 aria-hidden="true" size={16} /></span>
+        <span className="media-item-name" title={attachment.url ?? attachment.name}>{attachment.name}</span>
+        <span className={`media-preview-status is-${status}`}>{PREVIEW_STATUS_LABEL[status]}</span>
+        <button
+          type="button"
+          className={`media-edit-preview${editing ? ' is-active' : ''}`}
+          aria-label={`Edit ${attachment.name} preview`}
+          aria-expanded={editing}
+          title="Edit preview"
+          onClick={() => setEditing((value) => !value)}
+        >
+          <Pencil aria-hidden="true" size={14} />
+        </button>
+        <button type="button" className="media-remove" aria-label={`Remove ${attachment.name}`} onClick={() => onRemove(attachment.id)}>
+          <X aria-hidden="true" size={14} />
+        </button>
+      </div>
+      {editing ? (
+        <LinkPreviewForm attachment={attachment} onUpdate={onUpdate} onClose={() => setEditing(false)} />
+      ) : null}
+    </li>
+  );
+}
+
+function LinkPreviewForm({
+  attachment,
+  onUpdate,
+  onClose,
+}: {
+  attachment: Attachment;
+  onUpdate: (id: string, patch: Partial<Attachment>) => void;
+  onClose: () => void;
+}) {
+  const preview = attachment.preview;
+  const [title, setTitle] = useState(preview?.title ?? '');
+  const [description, setDescription] = useState(preview?.description ?? '');
+  const [imageUrl, setImageUrl] = useState(preview?.imageUrl ?? '');
+
+  function handleSave() {
+    onUpdate(attachment.id, {
+      preview: {
+        ...attachment.preview,
+        status: 'manual',
+        title: title.trim() || undefined,
+        description: description.trim() || undefined,
+        imageUrl: imageUrl.trim() || undefined,
+      },
+    });
+    onClose();
+  }
+
+  function handleRefetch() {
+    // Clearing the preview signals the app to re-fetch it from the unfurl service.
+    onUpdate(attachment.id, { preview: undefined });
+    onClose();
+  }
+
+  return (
+    <div className="media-preview-form">
+      <input type="text" value={title} placeholder="Preview title" aria-label="Preview title" onChange={(event) => setTitle(event.target.value)} />
+      <input type="text" value={description} placeholder="Description" aria-label="Preview description" onChange={(event) => setDescription(event.target.value)} />
+      <input type="url" value={imageUrl} placeholder="Image URL" aria-label="Preview image URL" onChange={(event) => setImageUrl(event.target.value)} />
+      <div className="media-preview-form-actions">
+        <button type="button" className="primary-action media-add-confirm" onClick={handleSave}>
+          <Check aria-hidden="true" size={13} /> Save
+        </button>
+        <button type="button" className="secondary-action media-add" onClick={handleRefetch}>
+          <RotateCcw aria-hidden="true" size={13} /> Re-fetch
+        </button>
+      </div>
+    </div>
   );
 }
 

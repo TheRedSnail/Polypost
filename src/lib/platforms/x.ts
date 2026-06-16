@@ -21,4 +21,6 @@ export const xSpec: PlatformSpec = {
     },
   },
   warnings: [],
+  // X shows a summary_large_image card: big image, title, domain — no description.
+  linkPreview: { show: true, layout: 'large', showDescription: false },
 };

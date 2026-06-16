@@ -28,4 +28,6 @@ export const threadsSpec: PlatformSpec = {
     },
   },
   warnings: [],
+  // Threads unfurls a large image card with title and domain.
+  linkPreview: { show: true, layout: 'large', showDescription: false },
 };

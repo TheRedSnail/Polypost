@@ -76,9 +76,10 @@ describe('sanitizePastedHTML', () => {
     const sanitized = sanitizePastedHTML(html, plainText);
 
     expect(sanitized.match(/<p>/g)).toHaveLength(5);
-    expect(sanitized).toContain('<p><br></p>');
-    expect(sanitized).toContain('<p>Intro paragraph.</p><p><br></p><p>📦 First detail paragraph.</p>');
-    expect(sanitized).toContain('<p>📦 First detail paragraph.</p><p><br></p><p>🔗 Second detail paragraph.</p>');
+    expect(sanitized).toContain('<p></p>');
+    expect(sanitized).not.toContain('<p><br></p>');
+    expect(sanitized).toContain('<p>Intro paragraph.</p><p></p><p>📦 First detail paragraph.</p>');
+    expect(sanitized).toContain('<p>📦 First detail paragraph.</p><p></p><p>🔗 Second detail paragraph.</p>');
   });
 
   it('trims whitespace from the Word <html>/<body> wrapper', () => {

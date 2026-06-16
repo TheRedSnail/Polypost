@@ -19,4 +19,6 @@ export const blueskySpec: PlatformSpec = {
     },
   },
   warnings: [],
+  // Bluesky external embeds show a large image, title, description, and domain.
+  linkPreview: { show: true, layout: 'large', showDescription: true },
 };

@@ -20,11 +20,15 @@ import { buildSourcesBlock, loadSources, saveSources, type Source } from './lib/
 import {
   linkUrls,
   loadAttachments,
+  restoreDraftAttachments,
   revokeAttachment,
   saveAttachments,
+  serializeAttachmentsForDraft,
   type Attachment,
+  type LinkPreview,
 } from './lib/media';
 import { markdownToTipTap } from './lib/markdownToTipTap';
+import { fetchLinkPreview, shouldRefreshLinkPreview } from './lib/linkPreview';
 import { generateFit } from './lib/ai/fit';
 import { generateText } from './lib/ai/llmClient';
 import { buildAuthorRequest } from './lib/ai/prompts';
@@ -102,6 +106,9 @@ function App() {
     aiVersionsRef.current = aiVersions;
   }, [aiVersions]);
   const fitAbortRef = useRef<AbortController | null>(null);
+  // Link preview states whose fetch has already been kicked off, so stale cached
+  // failures can retry once without re-fetching the same failed state forever.
+  const startedPreviewKeys = useRef<Set<string>>(new Set());
 
   // Apply + persist the color theme.
   useEffect(() => {
@@ -127,6 +134,41 @@ function App() {
 
   useEffect(() => {
     saveAttachments(attachments);
+  }, [attachments]);
+
+  // Fetch a link-unfurl preview for new, failed, or stale automatic metadata.
+  // Marks it loading, then patches in the result. Deduped by preview state;
+  // never overwrites a manual override.
+  useEffect(() => {
+    const pending = attachments.filter(
+      (attachment) =>
+        attachment.kind === 'link' &&
+        attachment.url &&
+        shouldRefreshLinkPreview(attachment.preview, attachment.url) &&
+        !startedPreviewKeys.current.has(previewFetchKey(attachment.id, attachment.preview)),
+    );
+
+    if (pending.length === 0) {
+      return;
+    }
+
+    for (const link of pending) {
+      const { id } = link;
+      const url = link.url as string;
+      startedPreviewKeys.current.add(previewFetchKey(id, link.preview));
+      setAttachments((prev) =>
+        prev.map((attachment) => (attachment.id === id ? { ...attachment, preview: { status: 'loading' } } : attachment)),
+      );
+
+      void fetchLinkPreview(url).then((preview) => {
+        startedPreviewKeys.current.add(previewFetchKey(id, preview));
+        setAttachments((prev) =>
+          prev.map((attachment) =>
+            attachment.id === id && attachment.preview?.status !== 'manual' ? { ...attachment, preview } : attachment,
+          ),
+        );
+      });
+    }
   }, [attachments]);
 
   // One render + seed document per enabled platform. The document each platform
@@ -307,7 +349,20 @@ function App() {
   }
 
   function handleAddAttachment(attachment: Attachment) {
-    setAttachments((prev) => [...prev, attachment]);
+    setAttachments((prev) => {
+      prev.forEach(revokeAttachment);
+      return [attachment];
+    });
+  }
+
+  function handleUpdateAttachment(id: string, patch: Partial<Attachment>) {
+    // Clearing the preview is a "re-fetch" request: forget the dedupe marker so
+    // the fetch-on-need effect runs again for this link.
+    if ('preview' in patch && patch.preview === undefined) {
+      startedPreviewKeys.current = new Set([...startedPreviewKeys.current].filter((key) => !key.startsWith(`${id}\u0000`)));
+    }
+
+    setAttachments((prev) => prev.map((attachment) => (attachment.id === id ? { ...attachment, ...patch } : attachment)));
   }
 
   function handleRemoveAttachment(id: string) {
@@ -408,15 +463,24 @@ function App() {
     setWorkspace((prev) => ({ ...prev, master: EMPTY_DOCUMENT, overrides: {} }));
     setAiVersions(new Map());
     setActivePaneEditor(null);
+    setSources([]);
+    setAttachments((prev) => {
+      prev.forEach(revokeAttachment);
+      return [];
+    });
+    startedPreviewKeys.current.clear();
     setEditorVersion((version) => version + 1);
     setStorageNotice(null);
   }
 
-  function handleSaveDraftSnapshot(title: string) {
+  async function handleSaveDraftSnapshot(title: string) {
     const characterCount = renderForPlatform(workspace.master, PLATFORMS_BY_ID.linkedin).summary.count;
+    const draftAttachments = await serializeAttachmentsForDraft(attachments);
     const result = saveDraftSnapshot(workspace.master, title, characterCount, {
       overrides: workspace.overrides,
       enabledPlatforms: workspace.enabledPlatforms,
+      sources,
+      attachments: draftAttachments,
     });
 
     if (result.ok) {
@@ -428,6 +492,12 @@ function App() {
   }
 
   function handleRestoreDraftSnapshot(draft: DraftSnapshot) {
+    setAttachments((prev) => {
+      prev.forEach(revokeAttachment);
+      return restoreDraftAttachments(draft.attachments);
+    });
+    startedPreviewKeys.current.clear();
+    setSources(draft.sources ?? []);
     setWorkspace((prev) => ({
       master: draft.document,
       overrides: draft.overrides ?? {},
@@ -539,6 +609,7 @@ function App() {
               attachments={attachments}
               onAddAttachment={handleAddAttachment}
               onRemoveAttachment={handleRemoveAttachment}
+              onUpdateAttachment={handleUpdateAttachment}
             />
             <DraftHistoryPanel
               drafts={draftHistory}
@@ -582,6 +653,10 @@ function App() {
       ) : null}
     </ErrorBoundary>
   );
+}
+
+function previewFetchKey(id: string, preview: LinkPreview | undefined): string {
+  return [id, preview?.status ?? 'missing', preview?.title ?? '', preview?.imageUrl ?? ''].join('\u0000');
 }
 
 export default App;

@@ -54,7 +54,7 @@ function removeEmptyBlocks(root: DocumentFragment, blankLinesToPreserve = 0) {
 
     if (!text) {
       if (blankLinesToPreserve > 0 && hasContentSibling(block, 'previous') && hasContentSibling(block, 'next')) {
-        block.replaceChildren(document.createElement('br'));
+        block.replaceChildren();
         blankLinesToPreserve -= 1;
         continue;
       }
@@ -65,10 +65,25 @@ function removeEmptyBlocks(root: DocumentFragment, blankLinesToPreserve = 0) {
 }
 
 function countBlankTextLines(text: string): number {
-  return text
+  const lines = text
     .replace(/\r\n?/g, '\n')
     .split('\n')
-    .filter((line) => !line.replace(/ /g, ' ').trim())
+    .map((line) => line.replace(/ /g, ' ').trim());
+  const firstContent = lines.findIndex(Boolean);
+
+  if (firstContent === -1) {
+    return 0;
+  }
+
+  let lastContent = lines.length - 1;
+
+  while (lastContent > firstContent && !lines[lastContent]) {
+    lastContent -= 1;
+  }
+
+  return lines
+    .slice(firstContent, lastContent + 1)
+    .filter((line) => !line)
     .length;
 }
 

@@ -73,12 +73,17 @@ export function HelpContent() {
         <h3>Images &amp; links</h3>
         <ul className="help-list">
           <li>
-            Add an image or a link once in "Images &amp; links" below the editor and reuse it everywhere — no need to
-            re-add it per platform.
+            Add one image or one link in "Images &amp; links" below the editor and reuse it everywhere — no need to
+            re-add it per platform. Adding a new one replaces the current attachment, matching LinkedIn's composer.
           </li>
           <li>
             Link URLs fold into each card's text and count against that platform's limit (on X each counts as 23), so
             Copy and Copy &amp; open include them automatically. Links are saved to this browser.
+          </li>
+          <li>
+            Each card shows how that platform will unfurl the link — the image and title/description it would display
+            (Instagram, which doesn't unfurl, says so). Preview details are fetched once and cached; use the pencil on a
+            link to edit the title, description, or image, or to re-fetch.
           </li>
           <li>
             For an image, use <strong>Copy image</strong> to put the picture on your clipboard and paste it straight into

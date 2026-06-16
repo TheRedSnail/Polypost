@@ -28,4 +28,11 @@ export const instagramSpec: PlatformSpec = {
       applies: (text) => (text.match(/(^|\s)#[A-Za-z0-9_]+/g)?.length ?? 0) > 30,
     },
   ],
+  // Instagram captions don't unfurl links (and links aren't tappable).
+  linkPreview: {
+    show: false,
+    layout: 'large',
+    showDescription: false,
+    note: "Links aren't clickable in Instagram captions and won't show a preview.",
+  },
 };
