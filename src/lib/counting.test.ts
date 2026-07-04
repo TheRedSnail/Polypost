@@ -65,4 +65,30 @@ describe('countCharacters', () => {
       expect(countCharacters('🚀', 'mastodon')).toBe(1);
     });
   });
+
+  describe('nfc-utf16', () => {
+    it('counts an astral styled character as 2 UTF-16 code units', () => {
+      // 𝗕 is U+1D5D5 MATHEMATICAL SANS-SERIF BOLD CAPITAL B — requires a surrogate pair.
+      expect(countCharacters('𝗕', 'nfc-utf16')).toBe(2);
+    });
+
+    it('counts ASCII characters as 1 unit each', () => {
+      expect(countCharacters('ab', 'nfc-utf16')).toBe(2);
+    });
+
+    it('counts an emoji (🚀, U+1F680) as 2 UTF-16 code units', () => {
+      expect(countCharacters('🚀', 'nfc-utf16')).toBe(2);
+    });
+
+    it('counts BMP characters as 1 unit each', () => {
+      // All of these are in the BMP (≤ U+FFFF).
+      expect(countCharacters('hello', 'nfc-utf16')).toBe(5);
+      expect(countCharacters('日本語', 'nfc-utf16')).toBe(3);
+    });
+
+    it('normalizes to NFC before measuring', () => {
+      // Decomposed é (e + U+0301) normalizes to a single BMP code point.
+      expect(countCharacters('é', 'nfc-utf16')).toBe(1);
+    });
+  });
 });
