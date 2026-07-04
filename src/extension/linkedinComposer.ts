@@ -128,7 +128,18 @@ export function dismissNativeComposerDiscardConfirmation(root: ParentNode = docu
     .flatMap((dialog) => getButtonLikeControls(dialog));
   const discardControl = controls.find((control) => {
     const label = getControlLabel(control);
-    return /^(discard|leave|delete|yes|ok)$/.test(label) || label.includes('discard post') || label.includes('discard draft');
+    // Only ever click controls that explicitly say "discard" — generic
+    // Delete/Yes/OK buttons belong to dialogs we must never touch, and this
+    // runs (hidden!) for up to 3s after the formatter closes.
+    const isDiscardLabel =
+      /^discard( draft| post)?$/.test(label) ||
+      label.includes('discard post') ||
+      label.includes('discard draft');
+    if (!isDiscardLabel) {
+      return false;
+    }
+    const dialogText = (control.closest<HTMLElement>(DIALOG_SELECTOR)?.textContent ?? '').toLowerCase();
+    return /\b(draft|post)\b/.test(dialogText);
   });
 
   if (!discardControl) {
