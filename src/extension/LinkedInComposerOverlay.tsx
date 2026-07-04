@@ -218,15 +218,19 @@ export function LinkedInComposerOverlay({ open, onClose, onPost }: LinkedInCompo
     setStatus('posting');
     setStatusMessage(attachments.length > 0 ? 'Uploading media and posting through LinkedIn...' : 'Posting through LinkedIn...');
 
-    if (await onPost(exportedText, attachments)) {
-      setAttachments([]);
-      setStatus('posted');
-      setStatusMessage('Posted');
-      return;
+    try {
+      if (await onPost(exportedText, attachments)) {
+        setAttachments([]);
+        setStatus('posted');
+        setStatusMessage('Posted');
+        return;
+      }
+    } catch (error) {
+      console.error('handlePost: onPost threw', error);
     }
 
     setStatus('error');
-    setStatusMessage('LinkedIn did not expose a post composer. Close this and try Start a post again.');
+    setStatusMessage("Posting did not complete — LinkedIn's own composer has been handed back to you. Your draft is kept here; check the composer to finish or discard.");
   }
 
   if (!open) {

@@ -298,11 +298,19 @@ async function postThroughLinkedIn(text: string, files: File[]): Promise<boolean
       // Post outcome unknown; hand LinkedIn's composer back to the user
       // instead of leaving an invisible dialog blocking the page.
       log('WARNING: composer still open after Post click, revealing it');
-    } else {
-      log('SUCCESS: posted through LinkedIn');
+      return false;
     }
 
+    log('SUCCESS: posted through LinkedIn');
     return true;
+  } catch (error) {
+    log('postThroughLinkedIn threw:', error);
+    // Recover the page: reveal LinkedIn's composer so nothing invisible
+    // blocks clicks, and report failure so the overlay leaves 'posting'.
+    isFormatterOpen = false;
+    renderFormatter(true);
+    showNativeComposer();
+    return false;
   } finally {
     isBridgingToNativeComposer = false;
   }
