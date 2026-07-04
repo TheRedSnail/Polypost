@@ -13,7 +13,11 @@ export function exportLinkedInText(document: EditorNode | null | undefined): str
 }
 
 export function countLinkedInCharacters(text: string): number {
-  return countCharacters(text, 'nfc-codepoints');
+  // LinkedIn's composer counts UTF-16 code units, not code points.  Every
+  // styled glyph this app emits (mathematical alphanumerics, U+1D400+) is an
+  // astral character that occupies 2 UTF-16 units — 'nfc-codepoints' would
+  // undercount them by half, causing apparent-safe posts to be rejected.
+  return countCharacters(text, 'nfc-utf16');
 }
 
 export function getLinkedInCharacterStatus(text: string) {

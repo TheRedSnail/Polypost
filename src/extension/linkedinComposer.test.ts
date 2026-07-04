@@ -224,6 +224,30 @@ describe('linkedinComposer helpers', () => {
     expect(discardHandler).toHaveBeenCalledTimes(1);
   });
 
+  it('does not click confirm buttons in unrelated dialogs', () => {
+    document.body.innerHTML = `
+      <div role="alertdialog">
+        <p>Are you sure you want to delete your comment?</p>
+        <button>Delete</button><button>Cancel</button>
+      </div>`;
+    expect(dismissNativeComposerDiscardConfirmation()).toBe(false);
+  });
+
+  it('still dismisses the share-draft discard dialog', () => {
+    document.body.innerHTML = `
+      <div role="dialog">
+        <p>Discard draft? Your post will not be saved.</p>
+        <button>Discard</button><button>Keep</button>
+      </div>`;
+    const discardButton = document.querySelectorAll<HTMLButtonElement>('button')[0];
+    const discardHandler = vi.fn();
+    discardButton.addEventListener('click', discardHandler);
+
+    expect(dismissNativeComposerDiscardConfirmation()).toBe(true);
+
+    expect(discardHandler).toHaveBeenCalledTimes(1);
+  });
+
   it('finds the composer inside a shadow root', () => {
     document.body.innerHTML = '<div id="interop-outlet"></div>';
     const host = document.querySelector<HTMLElement>('#interop-outlet');

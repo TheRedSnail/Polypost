@@ -1,13 +1,16 @@
 import { URL_PATTERN } from './unicodeStyles';
 
 // How a platform measures post length against its limit.
-// - 'nfc-codepoints': Unicode code points after NFC normalization (LinkedIn, most platforms).
+// - 'nfc-codepoints': Unicode code points after NFC normalization.
+// - 'nfc-utf16': UTF-16 code units after NFC normalization (JS String.length).
+//   Astral characters (code points > U+FFFF, e.g. mathematical alphanumerics,
+//   emoji) count as 2. This matches LinkedIn's composer limit enforcement.
 // - 'graphemes': user-perceived characters / grapheme clusters (Bluesky).
 // - 'x-weighted': X/Twitter's weighted scheme — most characters count as 1,
 //   wide ranges (CJK, emoji) as 2, and each URL as a fixed 23.
 // - 'mastodon': like nfc-codepoints, but every URL counts as a flat 23 (Mastodon
 //   counts links as 23 chars; unlike X it does NOT weight CJK/emoji as 2).
-export type CountingMethod = 'nfc-codepoints' | 'graphemes' | 'x-weighted' | 'mastodon';
+export type CountingMethod = 'nfc-codepoints' | 'nfc-utf16' | 'graphemes' | 'x-weighted' | 'mastodon';
 
 const URL_WEIGHT = 23;
 
@@ -20,6 +23,8 @@ export function countCharacters(text: string, method: CountingMethod): number {
   const normalized = text.normalize('NFC');
 
   switch (method) {
+    case 'nfc-utf16':
+      return normalized.length;
     case 'graphemes':
       return countGraphemes(normalized);
     case 'x-weighted':

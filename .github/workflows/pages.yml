@@ -30,6 +30,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test
+        run: npx vitest run
+
+      - name: Build extension (compile check)
+        run: npm run build:extension
+
       - name: Build
         run: npm run build
         env:

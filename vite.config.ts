@@ -47,6 +47,13 @@ export default defineConfig({
   ],
   test: {
     environment: 'jsdom',
+    // jsdom without a url uses an opaque origin, which makes localStorage
+    // undefined (SecurityError on access).  A localhost url gives jsdom a
+    // real origin so its built-in localStorage works on Node 26 without
+    // needing --localstorage-file.
+    environmentOptions: {
+      jsdom: { url: 'http://localhost/' },
+    },
     globals: true,
     setupFiles: './src/test/setup.ts',
     // The build-time virtual:pwa-register module isn't available under vitest;

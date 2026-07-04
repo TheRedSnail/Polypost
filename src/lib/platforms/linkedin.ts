@@ -10,7 +10,11 @@ export const linkedinSpec: PlatformSpec = {
   brandColor: '#0a66c2',
   charLimit: LINKEDIN_POST_CHARACTER_LIMIT,
   warningThreshold: LINKEDIN_POST_WARNING_THRESHOLD,
-  counting: 'nfc-codepoints',
+  // LinkedIn's composer enforces its 3,000-character limit in UTF-16 code units.
+  // Every mathematical alphanumeric / styled glyph this app produces (U+1D400+)
+  // is an astral character that requires a surrogate pair — 2 UTF-16 units — so
+  // 'nfc-codepoints' would silently undercount styled posts by up to 2×.
+  counting: 'nfc-utf16',
   allowUnicodeStyling: true,
   // The extension resolves @[Name] into a real LinkedIn mention, so keep the full
   // spaced "@Display Name".

@@ -168,11 +168,17 @@ describe('exportLinkedInText', () => {
     expect(exportLinkedInText(document)).toBe('Before after');
   });
 
-  it('counts the exported text, including Unicode output, by code point', () => {
+  it('counts the exported text, including Unicode output, in UTF-16 code units', () => {
     const exported = exportLinkedInText(doc([paragraph([text('A', [{ type: 'bold' }])])]));
 
+    // styleText('A', { bold: true }) → 𝗔 (U+1D5D4), an astral character = 2 UTF-16 units.
     expect(exported).toBe(styleText('A', { bold: true }));
-    expect(countLinkedInCharacters(exported)).toBe(1);
+    expect(countLinkedInCharacters(exported)).toBe(2);
+  });
+
+  it('counts an astral styled character as 2 UTF-16 units (LinkedIn composer semantics)', () => {
+    // 𝗕 is U+1D5D5 MATHEMATICAL SANS-SERIF BOLD CAPITAL B — a surrogate pair.
+    expect(countLinkedInCharacters('𝗕')).toBe(2);
   });
 
   it('returns LinkedIn character count status from the exported string', () => {
