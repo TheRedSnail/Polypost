@@ -100,6 +100,14 @@ function mountFormatter() {
     return;
   }
 
+  // Belt-and-suspenders: if another module instance already mounted a root
+  // (e.g. background.js injected the script a second time), don't create a
+  // duplicate that would add duplicate listeners and observers.
+  const existingRoot = document.getElementById(ROOT_ID);
+  if (existingRoot && existingRoot !== mountedContainer) {
+    return;
+  }
+
   const container = document.createElement('div');
   container.id = ROOT_ID;
   container.className = 'lipf-extension-root';
