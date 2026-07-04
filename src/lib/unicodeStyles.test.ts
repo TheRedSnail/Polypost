@@ -37,4 +37,20 @@ describe('styleText', () => {
   it('preserves emoji when applying combining styles', () => {
     expect(styleText('Ship 🚀 now', { underline: true, strike: true })).toBe('S̶̲h̶̲i̶̲p̶̲ 🚀 n̶̲o̶̲w̶̲');
   });
+
+  it('does not break ZWJ emoji sequences when striking through', () => {
+    expect(applyStrikethrough('a👨‍👩‍👧b')).toBe('a̶👨‍👩‍👧b̶');
+  });
+
+  it('does not break keycap sequences when underlining', () => {
+    expect(applyUnderline('x1️⃣y')).toBe('x̲1️⃣y̲');
+  });
+
+  it('does not break flag emoji when striking through', () => {
+    expect(applyStrikethrough('🇳🇱ok')).toBe('🇳🇱o̶k̶');
+  });
+
+  it('still marks plain ascii and digits', () => {
+    expect(applyUnderline('a1')).toBe('a̲1̲');
+  });
 });

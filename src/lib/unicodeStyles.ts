@@ -77,10 +77,40 @@ function styleSegment(text: string, options: UnicodeStyleOptions): string {
   return options.strike ? applyStrikethrough(mapped) : mapped;
 }
 
+// Matches ZWJ (U+200D), VS-16 emoji selector (U+FE0F), and combining
+// enclosing keycap (U+20E3) — their presence makes a multi-code-point grapheme
+// an emoji sequence that must not be split by a combining mark.
+const EMOJI_SEQUENCE_MARK_PATTERN = /[‍️⃣]/u;
+
 function applyCombiningMark(text: string, mark: string): string {
-  return Array.from(text)
-    .map((character) => (character.trim() && !EMOJI_PATTERN.test(character) && !COMBINING_MARK_PATTERN.test(character) ? `${character}${mark}` : character))
-    .join('');
+  // Segment by grapheme so ZWJ families, keycaps, and flags stay intact —
+  // appending a combining mark inside those clusters splits them apart.
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  let result = '';
+
+  for (const { segment } of segmenter.segment(text)) {
+    const codePoints = Array.from(segment);
+    const firstCodePoint = codePoints[0] ?? '';
+    // Skip whitespace, graphemes whose first code point is emoji (flags, ZWJ
+    // sequences, single pictographs), pure combining marks, and multi-code-point
+    // emoji sequences (keycaps, etc.) identified by ZWJ/VS-16/enclosing-keycap.
+    const skip =
+      !segment.trim() ||
+      EMOJI_PATTERN.test(firstCodePoint) ||
+      COMBINING_MARK_PATTERN.test(firstCodePoint) ||
+      (codePoints.length > 1 && EMOJI_SEQUENCE_MARK_PATTERN.test(segment));
+    if (skip) {
+      result += segment;
+    } else {
+      // Insert the new combining mark right after the base character so that
+      // successive calls (e.g. underline then strike) stack marks in a stable
+      // order: base + newest mark + any earlier combining marks.
+      const rest = codePoints.slice(1).join('');
+      result += `${firstCodePoint}${mark}${rest}`;
+    }
+  }
+
+  return result;
 }
 
 function getVariant(options: UnicodeStyleOptions): UnicodeVariant | null {
